@@ -10,6 +10,7 @@ import pyperclip
 import threading
 from pathlib import Path
 from typing import Dict, Any
+import locale
 
 
 class Translator:
@@ -52,8 +53,12 @@ class Translator:
 class PixabayViewer:
     def __init__(self, root):
         self.root = root
-        # Initialize translator with default language (English)
-        self.translator = Translator("en")
+        # Rileva la lingua di sistema e imposta il default su inglese se non supportata
+        system_lang = locale.getdefaultlocale()[0] or "en"
+        lang_code = system_lang.split("_")[0] if system_lang else "en"
+        if lang_code not in ("en", "it"):  # Aggiungi qui altre lingue se necessario
+            lang_code = "en"
+        self.translator = Translator(lang_code)
         self.root.title(self.translator.get("app_title"))
 
         # Set window to fullscreen
