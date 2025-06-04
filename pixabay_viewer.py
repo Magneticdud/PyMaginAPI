@@ -1,4 +1,5 @@
 import os
+import json
 import tkinter as tk
 from tkinter import ttk, messagebox
 from io import BytesIO
@@ -7,13 +8,50 @@ from PIL import Image, ImageTk
 from dotenv import load_dotenv
 import pyperclip
 import threading
-from urllib.parse import urlparse
+from pathlib import Path
+from typing import Dict, Any
+
+class Translator:
+    def __init__(self, language: str = 'en'):
+        self.language = language
+        self.translations: Dict[str, Any] = {}
+        self.load_translations()
+    
+    def load_translations(self):
+        """Load translations from JSON files in the translations directory"""
+        try:
+            trans_file = Path(__file__).parent / 'translations' / f'{self.language}.json'
+            with open(trans_file, 'r', encoding='utf-8') as f:
+                self.translations = json.load(f)
+        except Exception as e:
+            print(f"Error loading translations: {e}")
+            # Fallback to English if there's an error
+            if self.language != 'en':
+                self.language = 'en'
+                self.load_translations()
+    
+    def get(self, key: str, **kwargs) -> str:
+        """Get a translated string with optional formatting"""
+        try:
+            # Handle nested keys (e.g., 'error.api_error')
+            keys = key.split('.')
+            value = self.translations
+            for k in keys:
+                value = value[k]
+            
+            if isinstance(value, str) and kwargs:
+                return value.format(**kwargs)
+            return str(value)
+        except (KeyError, AttributeError):
+            return key  # Return the key if translation not found
 
 
 class PixabayViewer:
     def __init__(self, root):
         self.root = root
-        self.root.title("PyMaginAPI: the Pixabay Image App")
+        # Initialize translator with default language (English)
+        self.translator = Translator('en')
+        self.root.title(self.translator.get('app_title'))
 
         # Set window to fullscreen
         self.root.state("zoomed")  # Maximize window
@@ -49,11 +87,31 @@ class PixabayViewer:
         main_container = ttk.Frame(self.root)
         main_container.pack(fill=tk.BOTH, expand=True)
 
+        # Create menu bar
+        self.menubar = tk.Menu(self.root)
+        
+        # Language menu
+        language_menu = tk.Menu(self.menubar, tearoff=0)
+        language_menu.add_command(
+            label=self.translator.get('menu.english'), 
+            command=lambda: self.change_language('en')
+        )
+        language_menu.add_command(
+            label=self.translator.get('menu.italian'), 
+            command=lambda: self.change_language('it')
+        )
+        self.menubar.add_cascade(
+            label=self.translator.get('menu.language'), 
+            menu=language_menu
+        )
+        self.root.config(menu=self.menubar)
+        
         # Search frame
         search_frame = ttk.Frame(main_container, padding="10")
         search_frame.pack(fill=tk.X)
 
-        ttk.Label(search_frame, text="Search:").pack(side=tk.LEFT, padx=5)
+        self.search_label = ttk.Label(search_frame, text=self.translator.get('search_label'))
+        self.search_label.pack(side=tk.LEFT, padx=5)
         self.search_var = tk.StringVar()
         self.search_entry = ttk.Entry(
             search_frame, textvariable=self.search_var, width=50
@@ -62,13 +120,13 @@ class PixabayViewer:
         self.search_entry.bind("<Return>", lambda e: self.search_images())
 
         self.search_btn = ttk.Button(
-            search_frame, text="Search", command=self.search_images
+            search_frame, text=self.translator.get('search_button'), command=self.search_images
         )
         self.search_btn.pack(side=tk.LEFT, padx=5)
 
         # Stop button (initially hidden)
         self.stop_btn = ttk.Button(
-            search_frame, text="Stop", command=self.stop_search, style="Accent.TButton"
+            search_frame, text=self.translator.get('stop_button'), command=self.stop_search, style="Accent.TButton"
         )
 
         # Status bar
@@ -117,8 +175,112 @@ class PixabayViewer:
         self.canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
 
-    def update_status(self, message):
-        self.status_var.set(message)
+    def update_status(self, message_key, **kwargs):
+        """Update status bar with translated message"""
+        try:
+            if isinstance(message_key, str):
+                # Handle loading image status with current/total
+                if message_key.startswith('loading_image_'):
+                    try:
+                        _, current, total = message_key.split('_')
+                        message = self.translator.get('loading_image').format(
+                            current=current, total=total
+                        )
+                    except (ValueError, KeyError):
+                        message = self.translator.get('loading_image_default')
+                # Handle fetching page status
+                elif message_key == "fetching_page" and 'page' in kwargs:
+                    message = self.translator.get('fetching_page').format(page=kwargs['page'])
+                # Default case
+                else:
+                    message = self.translator.get(message_key, **kwargs)
+            else:
+                message = str(message_key)
+            self.status_var.set(message)
+            self.root.update_idletasks()
+        except Exception as e:
+            print(f"Error updating status: {e}")
+        
+    def change_language(self, lang_code):
+        """Change application language"""
+        if self.translator.language != lang_code:
+            self.translator = Translator(lang_code)
+            self.root.title(self.translator.get('app_title'))
+            self.search_btn.config(text=self.translator.get('search_button'))
+            self.stop_btn.config(text=self.translator.get('stop_button'))
+            self.retranslate_ui()
+            
+    def update_pagination_controls(self):
+        """Update pagination controls with current page and language"""
+        if not hasattr(self, 'pagination_frame'):
+            return
+            
+        # Clear existing controls
+        for widget in self.pagination_frame.winfo_children():
+            widget.destroy()
+            
+        if self.total_pages <= 1:
+            return
+            
+        # Previous button
+        prev_btn = ttk.Button(
+            self.pagination_frame,
+            text=self.translator.get('previous_button'),
+            command=lambda: self._perform_search(
+                self.current_query, max(1, self.current_page - 1)
+            ),
+            state="disabled" if self.current_page == 1 else "normal",
+        )
+        prev_btn.pack(side=tk.LEFT, padx=5)
+
+        # Page info
+        page_info = ttk.Label(
+            self.pagination_frame,
+            text=self.translator.get('page_info', 
+                                  current=self.current_page, 
+                                  total=self.total_pages),
+        )
+        page_info.pack(side=tk.LEFT, padx=10)
+
+        # Next button
+        next_btn = ttk.Button(
+            self.pagination_frame,
+            text=self.translator.get('next_button'),
+            command=lambda: self._perform_search(
+                self.current_query, min(self.total_pages, self.current_page + 1)
+            ),
+            state="disabled" if self.current_page >= self.total_pages else "normal",
+        )
+        next_btn.pack(side=tk.LEFT, padx=5)
+        
+        self.pagination_frame.pack(fill=tk.X, pady=5)
+
+    def retranslate_ui(self):
+        """Retranslate all UI elements"""
+        # Update window title
+        self.root.title(self.translator.get('app_title'))
+        
+        # Update search UI
+        if hasattr(self, 'search_btn'):
+            self.search_btn.config(text=self.translator.get('search_button'))
+        if hasattr(self, 'stop_btn'):
+            self.stop_btn.config(text=self.translator.get('stop_button'))
+        if hasattr(self, 'search_label'):
+            self.search_label.config(text=self.translator.get('search_label'))
+        if hasattr(self, 'search_entry'):
+            self.search_entry.update()
+        
+        # Update pagination
+        if hasattr(self, 'pagination_frame'):
+            self.update_pagination_controls()
+        
+        # Update status
+        if hasattr(self, 'images') and self.images:
+            self.update_status('ready')
+        else:
+            self.update_status('no_images')
+        
+        # Force a UI update
         self.root.update_idletasks()
 
     def stop_search(self):
@@ -132,18 +294,21 @@ class PixabayViewer:
     def search_images(self):
         query = self.search_var.get().strip()
         if not query:
-            messagebox.showwarning("Warning", "Please enter a search term")
+            messagebox.showwarning(
+                self.translator.get('error.api_error'),
+                self.translator.get('error.empty_query')
+            )
             return
 
         # Reset stop flag
         self.stop_request = False
 
         # Update UI for search in progress
-        self.search_btn["state"] = "disabled"
+        self.search_btn['state'] = 'disabled'
         self.stop_btn.pack(side=tk.LEFT, padx=5)
         self.progress.pack(fill=tk.X, padx=10, pady=5)
         self.progress.start(10)
-        self.update_status(f"Searching for '{query}'...")
+        self.update_status('searching_for', query=query)
 
         # Clear previous results
         for widget in self.scrollable_frame.winfo_children():
@@ -162,7 +327,7 @@ class PixabayViewer:
                 return
 
             # Update UI for search in progress
-            self.root.after(0, self.update_status, f"Contacting Pixabay API...")
+            self.root.after(0, self.update_status, "contacting_api")
             self.stop_btn.pack(side=tk.LEFT, padx=5)
             self.progress.pack(fill=tk.X, padx=10, pady=5)
             self.progress.start(10)
@@ -191,24 +356,26 @@ class PixabayViewer:
             if self.stop_request:
                 return
 
-            self.root.after(0, self.update_status, f"Contacting Pixabay API...")
+            self.root.after(0, self.update_status, "contacting_api")
             url = f"https://pixabay.com/api/?key={self.api_key}&q={query}&image_type=photo&per_page={self.per_page}&page={page}"
 
             # Make API request with timeout
-            self.root.after(0, self.update_status, f"Fetching page {page}...")
+            self.root.after(0, lambda: self.update_status("fetching_page", page=page))
             response = requests.get(url, timeout=15)
 
             if self.stop_request:
                 return
 
             self.root.after(0, self.progress.step, 25)  # Update progress
-
-            self.root.after(0, self.progress.step, 50)  # Update progress
             data = response.json()
 
-            if "hits" not in data or "totalHits" not in data:
+            if 'hits' not in data or 'totalHits' not in data:
                 self.root.after(
-                    0, lambda: messagebox.showerror("Error", "Invalid API response")
+                    0, 
+                    lambda: messagebox.showerror(
+                        self.translator.get('error.api_error'),
+                        self.translator.get('error.invalid_response')
+                    )
                 )
                 return
 
@@ -219,7 +386,7 @@ class PixabayViewer:
             self.root.after(0, self.progress.step, 75)  # Update progress
 
             if not self.images:
-                self.root.after(0, lambda: self.update_status("No images found"))
+                self.root.after(0, lambda: self.update_status("no_images"))
             else:
                 self.root.after(0, self.display_images)
                 self.root.after(0, self.update_pagination_controls)
@@ -229,25 +396,29 @@ class PixabayViewer:
             self.root.after(
                 0,
                 lambda: messagebox.showerror(
-                    "Error", "Request timed out. Please try again."
+                    self.translator.get('error.api_error'),
+                    self.translator.get('error.timeout')
                 ),
             )
         except requests.exceptions.RequestException as e:
             self.root.after(
                 0,
                 lambda: messagebox.showerror(
-                    "Network Error", f"Failed to fetch images: {str(e)}"
+                    self.translator.get('error.network_error'),
+                    self.translator.get('error.network_error_detail', error=str(e))
                 ),
             )
         except Exception as e:
+            error_msg = str(e)  # Capture the error message in the outer scope
             self.root.after(
                 0,
-                lambda: messagebox.showerror(
-                    "Error", f"An unexpected error occurred: {str(e)}"
-                ),
+                lambda msg=error_msg: messagebox.showerror(
+                    self.translator.get('error.api_error'),
+                    self.translator.get('error.unexpected_error', error=msg)
+                )
             )
         finally:
-            # Reset UI
+            # Reset UI in all cases
             self.root.after(0, self._reset_search_ui)
 
     def _reset_search_ui(self):
@@ -257,56 +428,27 @@ class PixabayViewer:
         self.progress.stop()
         self.progress.pack_forget()
 
-    def update_pagination_controls(self):
-        # Clear existing controls
-        for widget in self.pagination_frame.winfo_children():
-            widget.destroy()
-
-        if self.total_pages > 1:
-            # Previous button
-            prev_btn = ttk.Button(
-                self.pagination_frame,
-                text="← Previous",
-                command=lambda: self._perform_search(
-                    self.current_query, max(1, self.current_page - 1)
-                ),
-                state="disabled" if self.current_page == 1 else "normal",
-            )
-            prev_btn.pack(side=tk.LEFT, padx=5)
-
-            # Page info
-            page_info = ttk.Label(
-                self.pagination_frame,
-                text=f"Page {self.current_page} of {self.total_pages}",
-            )
-            page_info.pack(side=tk.LEFT, padx=10)
-
-            # Next button
-            next_btn = ttk.Button(
-                self.pagination_frame,
-                text="Next →",
-                command=lambda: self._perform_search(
-                    self.current_query, min(self.total_pages, self.current_page + 1)
-                ),
-                state="disabled" if self.current_page >= self.total_pages else "normal",
-            )
-            next_btn.pack(side=tk.LEFT, padx=5)
-
-        self.pagination_frame.pack(fill=tk.X, padx=10, pady=5)
-
     def display_images(self):
+        """Display images in a grid layout"""
         # Clear existing images and reset photo references
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
         self.photo_references = []
-
+            
         if not self.images:
-            ttk.Label(self.scrollable_frame, text="No images found").pack(pady=20)
-            self.pagination_frame.pack_forget()  # Hide pagination if no results
+            ttk.Label(
+                self.scrollable_frame, 
+                text=self.translator.get('no_images')
+            ).pack(pady=20)
+            if hasattr(self, 'pagination_frame'):
+                self.pagination_frame.pack_forget()  # Hide pagination if no results
             return
 
         self.update_status(
-            f"Page {self.current_page} of {self.total_pages} - Loading {len(self.images)} images..."
+            'loading_images',
+            current=self.current_page,
+            total=self.total_pages,
+            count=len(self.images)
         )
 
         # Configure grid for 4 columns
@@ -328,10 +470,13 @@ class PixabayViewer:
 
             try:
                 # Update status for current image
+                current = idx + 1
+                total = len(self.images)
                 self.root.after(
                     0,
-                    self.update_status,
-                    f"Loading image {idx + 1} of {len(self.images)}...",
+                    lambda c=current, t=total: self.update_status(
+                        f"loading_image_{c}_{t}"  # Combine into a single string
+                    )
                 )
 
                 # Load and resize image
@@ -372,7 +517,7 @@ class PixabayViewer:
                 id_frame = ttk.Frame(frame)
                 id_frame.pack(fill=tk.X, pady=2)
 
-                ttk.Label(id_frame, text="ID: ").pack(side=tk.LEFT)
+                ttk.Label(id_frame, text=self.translator.get('image_id')).pack(side=tk.LEFT)
                 id_label = ttk.Label(
                     id_frame, text=str(image_id), foreground="blue", cursor="hand2"
                 )
@@ -382,15 +527,15 @@ class PixabayViewer:
                 )
 
                 # Display tags
+                tags_text = self.translator.get('tags', tags=image_tags)
                 tags_label = ttk.Label(
-                    frame, text=f"Tags: {image_tags}", wraplength=280
+                    frame, text=tags_text, wraplength=280
                 )
                 tags_label.pack(pady=2)
 
                 # Display user and likes
-                user_label = ttk.Label(
-                    frame, text=f"By: {img_data.get('user', 'Unknown')}"
-                )
+                user_text = self.translator.get('by', user=img_data.get('user', 'Unknown'))
+                user_label = ttk.Label(frame, text=user_text)
                 user_label.pack(pady=2)
 
                 likes_label = ttk.Label(frame, text=f"❤ {img_data.get('likes', 0)}")
@@ -420,7 +565,7 @@ class PixabayViewer:
         self.root.after(
             0,
             self.update_status,
-            f"Page {self.current_page} of {self.total_pages} - Ready",
+            'ready'
         )
         self.progress.stop()
         self.progress.pack_forget()
@@ -449,9 +594,12 @@ class PixabayViewer:
     def copy_to_clipboard(self, text):
         try:
             pyperclip.copy(str(text))
-            messagebox.showinfo("Copied!", f"Copied to clipboard: {text}")
+            self.update_status('copied_to_clipboard', text=text)
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to copy to clipboard: {str(e)}")
+            messagebox.showerror(
+                self.translator.get('error.api_error'),
+                self.translator.get('error.copy_failed', error=str(e))
+            )
 
 
 def main():

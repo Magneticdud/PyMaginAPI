@@ -1,0 +1,34 @@
+{
+    "app_title": "PyMaginAPI: Pixabay Image App",
+    "search_label": "Search:",
+    "search_button": "Search",
+    "stop_button": "Stop",
+    "previous_button": "← Previous",
+    "next_button": "Next →",
+    "page_info": "Page {current} of {total}",
+    "no_images": "No images found",
+    "loading_image": "Loading image {current} of {total}",
+    "loading_image_default": "Loading images...",
+    "contacting_api": "Contacting Pixabay API...",
+    "fetching_page": "Fetching page {page}...",
+    "searching_for": "Searching for '{query}'...",
+    "ready": "Ready",
+    "image_id": "ID: ",
+    "by": "By: {user}",
+    "tags": "Tags: {tags}",
+    "error": {
+        "api_key_missing": "PIXABAY_API_KEY not found in .env file",
+        "api_error": "API Error",
+        "invalid_response": "Invalid API response",
+        "timeout": "Request timed out. Please try again.",
+        "network_error": "Network Error",
+        "unexpected_error": "An unexpected error occurred: {error}",
+        "copy_failed": "Failed to copy to clipboard: {error}",
+        "search_failed": "Failed to start search: {error}"
+    },
+    "menu": {
+        "language": "Language",
+        "english": "English",
+        "italian": "Italiano"
+    }
+}
