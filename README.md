@@ -2,15 +2,17 @@
 
 A Python Tkinter application for searching and browsing images from Pixabay. Features a responsive grid layout and easy image ID copying.
 
+![The project icon](icon.png)
+
 This is a simple application that allows users to search for images using keywords and browse through the results in a responsive grid layout. The application also allows users to copy the ID of any image to their clipboard with a single click. Why just copy the ID instead of downloading the image or making it larger? Because I use the ID to download the image using the Pixabay API in a different program, this is just a quick and easy way to get the ID of the image you want instead of using the browser.
 
 ## Features
 
 - Search for images using keywords
-- Display results in a responsive 3-column grid
+- Display results in a 4-column grid
 - View image details including ID, tags, and photographer
 - Copy image ID to clipboard with a single click
-- Responsive design with scrollable interface
+- Scrollable interface
 
 ## Prerequisites
 
@@ -63,3 +65,7 @@ PIXABAY_API_KEY=your_api_key_here
 - The application requires an active internet connection to fetch images
 - The free tier of Pixabay API has rate limits (100 requests per hour)
 - Never share your API key or commit it to version control
+
+## License
+
+[GPL-3.0](LICENSE)

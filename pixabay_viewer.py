@@ -13,7 +13,16 @@ class PixabayViewer:
     def __init__(self, root):
         self.root = root
         self.root.title("PyMaginAPI: the Pixabay Image App")
-        self.root.geometry("1200x900")  # Slightly taller to accommodate pagination
+        
+        # Set window to fullscreen
+        self.root.state('zoomed')  # Maximize window
+        self.root.minsize(1200, 800)  # Minimum size
+        
+        # Set window icon if available
+        try:
+            self.root.iconbitmap('icon.ico')
+        except:
+            pass
         
         # Load environment variables
         load_dotenv()
@@ -29,7 +38,8 @@ class PixabayViewer:
         self.current_page = 1
         self.total_pages = 1
         self.current_query = ""
-        self.per_page = 21  # Number of images per page
+        self.per_page = 24  # Number of images per page (divisible by 4 for 4-column layout)
+        self.columns = 4  # Number of columns in the grid
 
     def setup_ui(self):
         # Main container
@@ -73,7 +83,7 @@ class PixabayViewer:
         # Pagination frame (initially hidden)
         self.pagination_frame = ttk.Frame(main_container, padding="5")
         
-        # Status bar (moved to bottom of window)
+        # Status bar
         self.status_var = tk.StringVar()
         self.status_var.set("Ready")
         status_bar = ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
@@ -134,18 +144,47 @@ class PixabayViewer:
             if self.stop_request:
                 return
                 
+            # Update UI for search in progress
+            self.search_btn['state'] = 'disabled'
+            self.stop_btn.pack(side=tk.LEFT, padx=5)
+            self.progress.pack(fill=tk.X, padx=10, pady=5)
+            self.progress.start(10)
+            
             self.current_query = query
             self.current_page = page
             
-            self.update_status(f"Contacting Pixabay API...")
+            self.update_status(f"Searching for '{query}'...")
+            
+            # Start search in a separate thread
+            threading.Thread(
+                target=self._fetch_images, 
+                args=(query, page),
+                daemon=True
+            ).start()
+            
+        except Exception as e:
+            self.root.after(0, lambda: messagebox.showerror("Error", f"Failed to start search: {str(e)}"))
+            self._reset_search_ui()
+    
+    def _fetch_images(self, query, page):
+        """Fetch images in a background thread"""
+        try:
+            if self.stop_request:
+                return
+                
+            self.root.after(0, self.update_status, f"Contacting Pixabay API...")
             url = f"https://pixabay.com/api/?key={self.api_key}&q={query}&image_type=photo&per_page={self.per_page}&page={page}"
             
             # Make API request with timeout
-            response = requests.get(url, timeout=10)
+            self.root.after(0, self.update_status, f"Fetching page {page}...")
+            response = requests.get(url, timeout=15)
             
             if self.stop_request:
                 return
                 
+            self.root.after(0, self.progress.step, 25)  # Update progress
+                
+            self.root.after(0, self.progress.step, 50)  # Update progress
             data = response.json()
             
             if 'hits' not in data or 'totalHits' not in data:
@@ -156,11 +195,14 @@ class PixabayViewer:
             total_hits = data['totalHits']
             self.total_pages = max(1, (total_hits + self.per_page - 1) // self.per_page)
             
+            self.root.after(0, self.progress.step, 75)  # Update progress
+            
             if not self.images:
                 self.root.after(0, lambda: self.update_status("No images found"))
             else:
                 self.root.after(0, self.display_images)
                 self.root.after(0, self.update_pagination_controls)
+                self.root.after(0, self.progress.step, 100)  # Complete progress
                 
         except requests.exceptions.Timeout:
             self.root.after(0, lambda: messagebox.showerror("Error", "Request timed out. Please try again."))
@@ -209,31 +251,40 @@ class PixabayViewer:
                 state="disabled" if self.current_page >= self.total_pages else "normal"
             )
             next_btn.pack(side=tk.LEFT, padx=5)
-            
-            # Show pagination frame
-            self.pagination_frame.pack(fill=tk.X, pady=5)
+        
+        self.pagination_frame.pack(fill=tk.X, padx=10, pady=5)
     
     def display_images(self):
+        # Clear existing images and reset photo references
+        for widget in self.scrollable_frame.winfo_children():
+            widget.destroy()
+        self.photo_references = []
+            
         if not self.images:
             ttk.Label(self.scrollable_frame, text="No images found").pack(pady=20)
-            self.update_status("No images found")
             self.pagination_frame.pack_forget()  # Hide pagination if no results
             return
             
         self.update_status(f"Page {self.current_page} of {self.total_pages} - Loading {len(self.images)} images...")
+        
+        # Configure grid for 4 columns
+        for i in range(self.columns):
+            self.scrollable_frame.columnconfigure(i, weight=1, uniform='column')
             
-        # Create a 3-column grid
+        # Create image grid
         row = 0
         col = 0
-        max_columns = 3
-        
         for idx, img_data in enumerate(self.images):
+            # Skip if we've already processed this image (prevents duplication)
+            if idx > 0 and idx % self.per_page == 0:
+                break
+                
             frame = ttk.Frame(self.scrollable_frame, padding=5, relief="groove", borderwidth=1)
             frame.grid(row=row, column=col, padx=5, pady=5, sticky="nsew")
             
             try:
                 # Update status for current image
-                if idx % 3 == 0:  # Update status every 3 images
+                if idx % self.columns == 0:  # Update status every N images
                     self.root.after(0, self.update_status, f"Loading image {idx + 1} of {len(self.images)}...")
                     
                 # Load and resize image
@@ -243,7 +294,7 @@ class PixabayViewer:
                     img = Image.open(BytesIO(response.content))
                     img.thumbnail((300, 200))  # Resize image
                     photo = ImageTk.PhotoImage(img)
-                    self.photo_references.append(photo)  # Keep reference
+                    self.photo_references.append(photo)  # Keep reference to prevent garbage collection
                 except Exception as e:
                     print(f"Error loading image {idx}: {str(e)}")
                     continue
@@ -284,23 +335,14 @@ class PixabayViewer:
                 
                 # Update grid position
                 col += 1
-                if col >= max_columns:
+                if col >= self.columns:
                     col = 0
                     row += 1
                     
             except Exception as e:
-                print(f"Error loading image {idx}: {str(e)}")
+                print(f"Error processing image {idx}: {str(e)}")
                 continue
                 
-        # Configure grid weights
-        for i in range(max_columns):
-            self.scrollable_frame.columnconfigure(i, weight=1)
-            
-        # Bind mouse wheel events for scrolling
-        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
-        self.canvas.bind_all("<Button-4>", self._on_mousewheel)  # Linux scroll up
-        self.canvas.bind_all("<Button-5>", self._on_mousewheel)  # Linux scroll down
-        
         # Bind mouse enter/leave to ensure scroll events are captured properly
         self.canvas.bind("<Enter>", self._bind_mousewheel)
         self.canvas.bind("<Leave>", self._unbind_mousewheel)
