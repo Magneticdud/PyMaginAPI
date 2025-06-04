@@ -6,6 +6,8 @@ import requests
 from PIL import Image, ImageTk
 from dotenv import load_dotenv
 import pyperclip
+import threading
+from urllib.parse import urlparse
 
 class PixabayViewer:
     def __init__(self, root):
@@ -23,6 +25,7 @@ class PixabayViewer:
         self.setup_ui()
         self.images = []
         self.photo_references = []  # To prevent garbage collection
+        self.stop_request = False  # Flag to stop ongoing requests
 
     def setup_ui(self):
         # Search frame
@@ -35,8 +38,24 @@ class PixabayViewer:
         self.search_entry.pack(side=tk.LEFT, padx=5)
         self.search_entry.bind('<Return>', lambda e: self.search_images())
         
-        search_btn = ttk.Button(search_frame, text="Search", command=self.search_images)
-        search_btn.pack(side=tk.LEFT, padx=5)
+        self.search_btn = ttk.Button(search_frame, text="Search", command=self.search_images)
+        self.search_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Stop button (initially hidden)
+        self.stop_btn = ttk.Button(search_frame, text="Stop", command=self.stop_search, style='Accent.TButton')
+        
+        # Status bar
+        self.status_var = tk.StringVar()
+        self.status_var.set("Ready")
+        status_bar = ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
+        status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # Progress bar
+        self.progress = ttk.Progressbar(self.root, orient=tk.HORIZONTAL, length=100, mode='indeterminate')
+        
+        # Configure styles
+        style = ttk.Style()
+        style.configure('Accent.TButton', foreground='red')
         
         # Canvas with scrollbar
         self.canvas = tk.Canvas(self.root)
@@ -56,37 +75,94 @@ class PixabayViewer:
         self.canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
 
+    def update_status(self, message):
+        self.status_var.set(message)
+        self.root.update_idletasks()
+    
+    def stop_search(self):
+        self.stop_request = True
+        self.search_btn['state'] = 'normal'
+        self.stop_btn.pack_forget()
+        self.progress.stop()
+        self.progress.pack_forget()
+        self.update_status("Search stopped")
+    
     def search_images(self):
         query = self.search_var.get().strip()
         if not query:
             messagebox.showwarning("Warning", "Please enter a search term")
             return
-            
+        
+        # Reset stop flag
+        self.stop_request = False
+        
+        # Update UI for search in progress
+        self.search_btn['state'] = 'disabled'
+        self.stop_btn.pack(side=tk.LEFT, padx=5)
+        self.progress.pack(fill=tk.X, padx=10, pady=5)
+        self.progress.start(10)
+        self.update_status(f"Searching for '{query}'...")
+        
         # Clear previous results
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
         self.photo_references.clear()
+        self.root.update_idletasks()
         
-        # Make API request
+        # Start search in a separate thread
+        threading.Thread(target=self._perform_search, args=(query,), daemon=True).start()
+    
+    def _perform_search(self, query):
         try:
+            if self.stop_request:
+                return
+                
+            self.update_status(f"Contacting Pixabay API...")
             url = f"https://pixabay.com/api/?key={self.api_key}&q={query}&image_type=photo&per_page=21"
-            response = requests.get(url)
+            
+            # Make API request with timeout
+            response = requests.get(url, timeout=10)
+            
+            if self.stop_request:
+                return
+                
             data = response.json()
             
             if 'hits' not in data:
-                messagebox.showerror("Error", "Invalid API response")
+                self.root.after(0, lambda: messagebox.showerror("Error", "Invalid API response"))
                 return
                 
             self.images = data['hits']
-            self.display_images()
             
+            if not self.images:
+                self.root.after(0, lambda: self.update_status("No images found"))
+            else:
+                self.root.after(0, self.display_images)
+                
+        except requests.exceptions.Timeout:
+            self.root.after(0, lambda: messagebox.showerror("Error", "Request timed out. Please try again."))
+        except requests.exceptions.RequestException as e:
+            self.root.after(0, lambda: messagebox.showerror("Network Error", f"Failed to fetch images: {str(e)}"))
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to fetch images: {str(e)}")
+            self.root.after(0, lambda: messagebox.showerror("Error", f"An unexpected error occurred: {str(e)}"))
+        finally:
+            # Reset UI
+            self.root.after(0, self._reset_search_ui)
+    
+    def _reset_search_ui(self):
+        """Reset UI elements after search is complete or stopped"""
+        self.search_btn['state'] = 'normal'
+        self.stop_btn.pack_forget()
+        self.progress.stop()
+        self.progress.pack_forget()
     
     def display_images(self):
         if not self.images:
             ttk.Label(self.scrollable_frame, text="No images found").pack(pady=20)
+            self.update_status("No images found")
             return
+            
+        self.update_status(f"Loading {len(self.images)} images...")
             
         # Create a 3-column grid
         row = 0
@@ -98,12 +174,21 @@ class PixabayViewer:
             frame.grid(row=row, column=col, padx=5, pady=5, sticky="nsew")
             
             try:
+                # Update status for current image
+                if idx % 3 == 0:  # Update status every 3 images
+                    self.root.after(0, self.update_status, f"Loading image {idx + 1} of {len(self.images)}...")
+                    
                 # Load and resize image
-                response = requests.get(img_data['webformatURL'])
-                img = Image.open(BytesIO(response.content))
-                img.thumbnail((300, 200))  # Resize image
-                photo = ImageTk.PhotoImage(img)
-                self.photo_references.append(photo)  # Keep reference
+                try:
+                    response = requests.get(img_data['webformatURL'], stream=True, timeout=10)
+                    response.raise_for_status()
+                    img = Image.open(BytesIO(response.content))
+                    img.thumbnail((300, 200))  # Resize image
+                    photo = ImageTk.PhotoImage(img)
+                    self.photo_references.append(photo)  # Keep reference
+                except Exception as e:
+                    print(f"Error loading image {idx}: {str(e)}")
+                    continue
                 
                 # Display image
                 label = ttk.Label(frame, image=photo)
