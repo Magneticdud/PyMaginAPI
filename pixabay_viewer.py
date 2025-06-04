@@ -13,7 +13,7 @@ class PixabayViewer:
     def __init__(self, root):
         self.root = root
         self.root.title("PyMaginAPI: the Pixabay Image App")
-        self.root.geometry("1200x800")
+        self.root.geometry("1200x900")  # Slightly taller to accommodate pagination
         
         # Load environment variables
         load_dotenv()
@@ -26,10 +26,18 @@ class PixabayViewer:
         self.images = []
         self.photo_references = []  # To prevent garbage collection
         self.stop_request = False  # Flag to stop ongoing requests
+        self.current_page = 1
+        self.total_pages = 1
+        self.current_query = ""
+        self.per_page = 21  # Number of images per page
 
     def setup_ui(self):
+        # Main container
+        main_container = ttk.Frame(self.root)
+        main_container.pack(fill=tk.BOTH, expand=True)
+        
         # Search frame
-        search_frame = ttk.Frame(self.root, padding="10")
+        search_frame = ttk.Frame(main_container, padding="10")
         search_frame.pack(fill=tk.X)
         
         ttk.Label(search_frame, text="Search:").pack(side=tk.LEFT, padx=5)
@@ -58,9 +66,18 @@ class PixabayViewer:
         style.configure('Accent.TButton', foreground='red')
         
         # Canvas with scrollbar
-        self.canvas = tk.Canvas(self.root)
-        self.scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=self.canvas.yview)
+        self.canvas = tk.Canvas(main_container)
+        self.scrollbar = ttk.Scrollbar(main_container, orient="vertical", command=self.canvas.yview)
         self.scrollable_frame = ttk.Frame(self.canvas)
+        
+        # Pagination frame (initially hidden)
+        self.pagination_frame = ttk.Frame(main_container, padding="5")
+        
+        # Status bar (moved to bottom of window)
+        self.status_var = tk.StringVar()
+        self.status_var.set("Ready")
+        status_bar = ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
+        status_bar.pack(side=tk.BOTTOM, fill=tk.X)
         
         self.scrollable_frame.bind(
             "<Configure>",
@@ -112,13 +129,16 @@ class PixabayViewer:
         # Start search in a separate thread
         threading.Thread(target=self._perform_search, args=(query,), daemon=True).start()
     
-    def _perform_search(self, query):
+    def _perform_search(self, query, page=1):
         try:
             if self.stop_request:
                 return
                 
+            self.current_query = query
+            self.current_page = page
+            
             self.update_status(f"Contacting Pixabay API...")
-            url = f"https://pixabay.com/api/?key={self.api_key}&q={query}&image_type=photo&per_page=21"
+            url = f"https://pixabay.com/api/?key={self.api_key}&q={query}&image_type=photo&per_page={self.per_page}&page={page}"
             
             # Make API request with timeout
             response = requests.get(url, timeout=10)
@@ -128,16 +148,19 @@ class PixabayViewer:
                 
             data = response.json()
             
-            if 'hits' not in data:
+            if 'hits' not in data or 'totalHits' not in data:
                 self.root.after(0, lambda: messagebox.showerror("Error", "Invalid API response"))
                 return
                 
             self.images = data['hits']
+            total_hits = data['totalHits']
+            self.total_pages = max(1, (total_hits + self.per_page - 1) // self.per_page)
             
             if not self.images:
                 self.root.after(0, lambda: self.update_status("No images found"))
             else:
                 self.root.after(0, self.display_images)
+                self.root.after(0, self.update_pagination_controls)
                 
         except requests.exceptions.Timeout:
             self.root.after(0, lambda: messagebox.showerror("Error", "Request timed out. Please try again."))
@@ -156,13 +179,48 @@ class PixabayViewer:
         self.progress.stop()
         self.progress.pack_forget()
     
+    def update_pagination_controls(self):
+        # Clear existing controls
+        for widget in self.pagination_frame.winfo_children():
+            widget.destroy()
+        
+        if self.total_pages > 1:
+            # Previous button
+            prev_btn = ttk.Button(
+                self.pagination_frame, 
+                text="← Previous",
+                command=lambda: self._perform_search(self.current_query, max(1, self.current_page - 1)),
+                state="disabled" if self.current_page == 1 else "normal"
+            )
+            prev_btn.pack(side=tk.LEFT, padx=5)
+            
+            # Page info
+            page_info = ttk.Label(
+                self.pagination_frame,
+                text=f"Page {self.current_page} of {self.total_pages}"
+            )
+            page_info.pack(side=tk.LEFT, padx=10)
+            
+            # Next button
+            next_btn = ttk.Button(
+                self.pagination_frame, 
+                text="Next →",
+                command=lambda: self._perform_search(self.current_query, min(self.total_pages, self.current_page + 1)),
+                state="disabled" if self.current_page >= self.total_pages else "normal"
+            )
+            next_btn.pack(side=tk.LEFT, padx=5)
+            
+            # Show pagination frame
+            self.pagination_frame.pack(fill=tk.X, pady=5)
+    
     def display_images(self):
         if not self.images:
             ttk.Label(self.scrollable_frame, text="No images found").pack(pady=20)
             self.update_status("No images found")
+            self.pagination_frame.pack_forget()  # Hide pagination if no results
             return
             
-        self.update_status(f"Loading {len(self.images)} images...")
+        self.update_status(f"Page {self.current_page} of {self.total_pages} - Loading {len(self.images)} images...")
             
         # Create a 3-column grid
         row = 0
@@ -196,7 +254,13 @@ class PixabayViewer:
                 
                 # Display image info
                 image_id = img_data.get('id', 'N/A')
+                image_title = img_data.get('tags', 'Untitled').title()
                 image_tags = img_data.get('tags', 'N/A')
+                
+                # Display image title (first few words of tags)
+                title_text = ' '.join(image_title.split()[:5]) + ('...' if len(image_title.split()) > 5 else '')
+                title_label = ttk.Label(frame, text=title_text, font=('Arial', 9, 'bold'), wraplength=280)
+                title_label.pack(pady=(5, 2))
                 
                 # Make clickable ID that copies to clipboard
                 id_frame = ttk.Frame(frame)
@@ -244,6 +308,8 @@ class PixabayViewer:
         # Update scrollregion after all widgets are added
         self.canvas.update_idletasks()
         self.canvas.config(scrollregion=self.canvas.bbox("all"))
+        # Scroll to top when new results are loaded
+        self.canvas.yview_moveto(0.0)
     
     def _on_mousewheel(self, event):
         """Handle mouse wheel/trackpad scrolling"""
