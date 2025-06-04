@@ -165,14 +165,6 @@ class PixabayViewer:
         # Pagination frame (initially hidden)
         self.pagination_frame = ttk.Frame(main_container, padding="5")
 
-        # Status bar
-        self.status_var = tk.StringVar()
-        self.status_var.set("Ready")
-        status_bar = ttk.Label(
-            self.root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W
-        )
-        status_bar.pack(side=tk.BOTTOM, fill=tk.X)
-
         self.scrollable_frame.bind(
             "<Configure>",
             lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")),
