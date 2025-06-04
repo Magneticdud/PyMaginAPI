@@ -1,0 +1,9 @@
+version: 2
+updates:
+  - package-ecosystem: "pip"   # Required: Set ecosystem to pip
+    directory: "/"             # Path to your requirements.txt (root directory)
+    schedule:
+      interval: "weekly"       # Check frequency (daily/weekly/monthly)
+    commit-message:            # Customize commit messages
+      prefix: "chore"
+      prefix-development: "dev-deps"

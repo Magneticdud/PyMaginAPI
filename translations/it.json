@@ -1,0 +1,38 @@
+{
+    "app_title": "PyMaginAPI: Un'applicazione per trovare immagini su Pixabay",
+    "search_label": "Cerca:",
+    "search_button": "Cerca",
+    "stop_button": "Ferma",
+    "previous_button": "← Precedente",
+    "next_button": "Successivo →",
+    "page_info": "Pagina {current} di {total}",
+    "no_images": "Nessuna immagine trovata",
+    "loading_image": "Caricamento immagine {current} di {total}",
+    "loading_image_default": "Caricamento immagini...",
+    "loading_images": "Pagina {current} di {total} - Caricamento {count} immagini...",
+    "contacting_api": "Connessione all'API di Pixabay...",
+    "fetching_page": "Caricamento pagina {page}...",
+    "searching_for": "Ricerca di '{query}'...",
+    "ready": "Pronto",
+    "image_id": "ID: ",
+    "by": "Di: {user}",
+    "tags": "Tag: {tags}",
+    "copied_to_clipboard": "Copiato negli appunti: {text}",
+    "error": {
+        "api_key_missing": "PIXABAY_API_KEY non trovata nel file .env",
+        "api_error": "Errore API",
+        "invalid_response": "Risposta API non valida",
+        "timeout": "Timeout della richiesta. Riprovare.",
+        "network_error": "Errore di rete",
+        "network_error_detail": "Impossibile recuperare le immagini: {error}",
+        "unexpected_error": "Si è verificato un errore imprevisto: {error}",
+        "copy_failed": "Impossibile copiare negli appunti: {error}",
+        "search_failed": "Impossibile avviare la ricerca: {error}",
+        "empty_query": "Inserisci un termine di ricerca"
+    },
+    "menu": {
+        "language": "Lingua",
+        "english": "Inglese",
+        "italian": "Italiano"
+    }
+}
