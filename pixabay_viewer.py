@@ -145,15 +145,14 @@ class PixabayViewer:
                 return
                 
             # Update UI for search in progress
-            self.search_btn['state'] = 'disabled'
+            self.root.after(0, self.update_status, f"Contacting Pixabay API...")
             self.stop_btn.pack(side=tk.LEFT, padx=5)
             self.progress.pack(fill=tk.X, padx=10, pady=5)
             self.progress.start(10)
             
+            # Store search state
             self.current_query = query
             self.current_page = page
-            
-            self.update_status(f"Searching for '{query}'...")
             
             # Start search in a separate thread
             threading.Thread(
@@ -284,8 +283,7 @@ class PixabayViewer:
             
             try:
                 # Update status for current image
-                if idx % self.columns == 0:  # Update status every N images
-                    self.root.after(0, self.update_status, f"Loading image {idx + 1} of {len(self.images)}...")
+                self.root.after(0, self.update_status, f"Loading image {idx + 1} of {len(self.images)}...")
                     
                 # Load and resize image
                 try:
@@ -352,6 +350,12 @@ class PixabayViewer:
         self.canvas.config(scrollregion=self.canvas.bbox("all"))
         # Scroll to top when new results are loaded
         self.canvas.yview_moveto(0.0)
+        
+        # Update status to show loading is complete
+        self.root.after(0, self.update_status, 
+                       f"Page {self.current_page} of {self.total_pages} - Ready")
+        self.progress.stop()
+        self.progress.pack_forget()
     
     def _on_mousewheel(self, event):
         """Handle mouse wheel/trackpad scrolling"""

@@ -14,6 +14,10 @@ This is a simple application that allows users to search for images using keywor
 - Copy image ID to clipboard with a single click
 - Scrollable interface
 
+## Screenshots
+
+![A screenshot showing a cat search](screenshot.png)
+
 ## Prerequisites
 
 - Python 3.6 or higher
