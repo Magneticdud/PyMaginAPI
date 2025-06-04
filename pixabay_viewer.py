@@ -231,6 +231,40 @@ class PixabayViewer:
         # Configure grid weights
         for i in range(max_columns):
             self.scrollable_frame.columnconfigure(i, weight=1)
+            
+        # Bind mouse wheel events for scrolling
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        self.canvas.bind_all("<Button-4>", self._on_mousewheel)  # Linux scroll up
+        self.canvas.bind_all("<Button-5>", self._on_mousewheel)  # Linux scroll down
+        
+        # Bind mouse enter/leave to ensure scroll events are captured properly
+        self.canvas.bind("<Enter>", self._bind_mousewheel)
+        self.canvas.bind("<Leave>", self._unbind_mousewheel)
+        
+        # Update scrollregion after all widgets are added
+        self.canvas.update_idletasks()
+        self.canvas.config(scrollregion=self.canvas.bbox("all"))
+    
+    def _on_mousewheel(self, event):
+        """Handle mouse wheel/trackpad scrolling"""
+        if event.num == 4:  # Linux scroll up
+            self.canvas.yview_scroll(-1, "units")
+        elif event.num == 5:  # Linux scroll down
+            self.canvas.yview_scroll(1, "units")
+        else:  # Windows/MacOS
+            self.canvas.yview_scroll(-1 * int(event.delta/120), "units")
+    
+    def _bind_mousewheel(self, event):
+        """Bind mouse wheel events when mouse enters canvas"""
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        self.canvas.bind_all("<Button-4>", self._on_mousewheel)
+        self.canvas.bind_all("<Button-5>", self._on_mousewheel)
+    
+    def _unbind_mousewheel(self, event):
+        """Unbind mouse wheel events when mouse leaves canvas"""
+        self.canvas.unbind_all("<MouseWheel>")
+        self.canvas.unbind_all("<Button-4>")
+        self.canvas.unbind_all("<Button-5>")
     
     def copy_to_clipboard(self, text):
         try:
